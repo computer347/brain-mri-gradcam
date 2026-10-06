@@ -12,3 +12,5 @@ venv/
 # Models / outputs
 *.h5
 *.keras
+/results/
+/train_log.txt

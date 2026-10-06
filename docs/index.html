@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brain MRI Grad-CAM</title>
+<meta name="description" content="A CNN that classifies brain MRI scans into four classes and shows where it looked, using Grad-CAM.">
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1b1d21; --muted: #5f6570; --line: #e3e3df;
+    --accent: #2a6fdb; --ok: #1f8a4c; --bad: #c43d2f; --bar: #dfe7f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121417; --surface: #1b1e23; --text: #eceef1; --muted: #9aa1ac; --line: #2c3037;
+      --accent: #6ea0f5; --ok: #4cc27f; --bad: #f07163; --bar: #26324a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121417; --surface: #1b1e23; --text: #eceef1; --muted: #9aa1ac; --line: #2c3037;
+    --accent: #6ea0f5; --ok: #4cc27f; --bad: #f07163; --bar: #26324a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 64px; }
+  header p.kicker { color: var(--accent); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 13px; margin: 0 0 8px; }
+  h1 { font-size: clamp(28px, 5vw, 42px); line-height: 1.15; margin: 0 0 12px; }
+  h2 { font-size: 22px; margin: 48px 0 12px; }
+  .lede { color: var(--muted); font-size: 18px; max-width: 720px; margin: 0; }
+  .links { margin-top: 16px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .links a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 32px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .stat b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .charts { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+  .charts img { width: 100%; height: auto; display: block; border-radius: 6px; background: #fff; }
+  .note { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .filters button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+                    border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+  .filters button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .ex .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .ex img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; display: block; background: #000; }
+  .ex .cap { font-size: 12px; color: var(--muted); text-align: center; margin-top: 2px; }
+  .ex h3 { font-size: 15px; margin: 12px 0 2px; }
+  .verdict { font-weight: 600; font-size: 14px; }
+  .verdict.ok { color: var(--ok); } .verdict.bad { color: var(--bad); }
+  .probs { margin-top: 8px; display: grid; gap: 4px; }
+  .prob { display: grid; grid-template-columns: 84px 1fr 44px; align-items: center; gap: 8px; font-size: 12px; }
+  .prob .track { height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; }
+  .prob .fill { height: 100%; background: var(--accent); }
+  .prob .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  td.num { font-variant-numeric: tabular-nums; }
+  ul { padding-left: 20px; } li { margin: 4px 0; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+  @media (max-width: 720px) { .charts { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="kicker">Explainable medical imaging</p>
+    <h1>Brain tumor MRI classification you can see inside</h1>
+    <p class="lede">A compact convolutional network sorts brain MRI slices into glioma, meningioma, pituitary tumor or no tumor.
+      Grad-CAM heatmaps then show which part of each scan drove the decision, so a reviewer can check whether the model is
+      looking at the lesion or at something irrelevant.</p>
+    <div class="links">
+      <a href="https://github.com/computer347/brain-mri-gradcam">Source code on GitHub →</a>
+      <a href="https://github.com/computer347/3d_mri">3D BraTS segmentation project →</a>
+    </div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <section>
+    <h2>Training and evaluation</h2>
+    <div class="charts">
+      <div class="card"><img src="results/training_curves.svg" alt="Accuracy and loss per epoch for training and test sets"></div>
+      <div class="card"><img src="results/confusion_matrix.svg" alt="Confusion matrix on the held-out test set"></div>
+    </div>
+    <p class="note" id="cfg"></p>
+  </section>
+
+  <section>
+    <h2>Per-class results</h2>
+    <div class="card"><table id="perclass"><thead><tr><th>Class</th><th>Test images</th><th>Correct</th><th>Recall</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section id="gallery-section">
+    <h2>Grad-CAM: where the model looked</h2>
+    <p class="note" style="margin:0 0 16px">Randomly chosen test scans, three per class. Red/yellow areas pushed the model toward its prediction most strongly.</p>
+    <div class="filters" id="filters"></div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <ul>
+      <li>Images resized to 224×224 and scaled to [0, 1].</li>
+      <li>Three Conv2D + MaxPooling blocks (32, 64, 64 filters) → Dense(64) → 4 logits, trained with Adam and cross-entropy.</li>
+      <li>Grad-CAM: gradients of the predicted class score with respect to the last conv layer are averaged per channel and used to weight that layer's feature maps, giving a coarse localization heatmap.</li>
+    </ul>
+    <h2>Limitations</h2>
+    <ul>
+      <li>Small CNN trained from scratch with no augmentation; transfer learning would likely do better.</li>
+      <li>The test set doubles as validation data during training, so the reported accuracy is slightly optimistic.</li>
+      <li>Grad-CAM at a 26×26 feature map is coarse and shows correlation, not proof of medical reasoning.</li>
+    </ul>
+  </section>
+
+  <footer>
+    Research and educational project only: not a medical device and not for clinical diagnosis.
+    Data: <a href="https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset">Brain Tumor MRI Dataset</a> (Kaggle, M. Nickparvar), not redistributed here.
+  </footer>
+</main>
+<script>
+const pct = v => (v * 100).toFixed(1) + "%";
+fetch("results/metrics.json").then(r => r.json()).then(m => {
+  const n = m.classes.length;
+  const cm = m.confusion_matrix;
+  const correct = cm.reduce((s, row, i) => s + row[i], 0);
+  const best = Math.max(...m.history.val_accuracy);
+  document.getElementById("stats").innerHTML = [
+    [pct(m.test_accuracy), "test accuracy"],
+    [`${correct} / ${m.config.n_test}`, "test scans correct"],
+    [m.config.n_train.toLocaleString(), "training images"],
+    [n, "classes"],
+  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+  document.getElementById("cfg").textContent =
+    `${m.config.epochs} epochs, batch size ${m.config.batch_size}, ${m.config.img_size.join("×")} input, trained on CPU.`;
+
+  document.querySelector("#perclass tbody").innerHTML = m.classes.map((c, i) => {
+    const total = cm[i].reduce((a, b) => a + b, 0);
+    return `<tr><td>${c}</td><td class="num">${total}</td><td class="num">${cm[i][i]}</td><td class="num">${pct(m.per_class_accuracy[c])}</td></tr>`;
+  }).join("");
+
+  if (!m.examples || !m.examples.length) { document.getElementById("gallery-section").hidden = true; return; }
+  const gallery = document.getElementById("gallery");
+  const render = filter => {
+    gallery.innerHTML = m.examples.filter(e => filter === "all" || e.true === filter).map(e => {
+      const ok = e.true === e.pred;
+      const probs = Object.entries(e.probs).sort((a, b) => b[1] - a[1]).map(([c, p]) =>
+        `<div class="prob"><span>${c}</span><div class="track"><div class="fill" style="width:${(p * 100).toFixed(1)}%"></div></div><span class="v">${pct(p)}</span></div>`).join("");
+      return `<div class="card ex">
+        <div class="pair">
+          <div><img loading="lazy" src="results/examples/${e.name}_scan.png" alt="MRI scan, true class ${e.true}"><div class="cap">scan</div></div>
+          <div><img loading="lazy" src="results/examples/${e.name}_gradcam.png" alt="Grad-CAM overlay"><div class="cap">Grad-CAM</div></div>
+        </div>
+        <h3>True: ${e.true}</h3>
+        <div class="verdict ${ok ? "ok" : "bad"}">${ok ? "✓" : "✗"} Predicted ${e.pred} (${pct(e.confidence)})</div>
+        <div class="probs">${probs}</div>
+      </div>`;
+    }).join("");
+  };
+  const filters = document.getElementById("filters");
+  ["all", ...m.classes].forEach(c => {
+    const b = document.createElement("button");
+    b.textContent = c; b.setAttribute("aria-pressed", c === "all");
+    b.onclick = () => { filters.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); render(c); };
+    filters.appendChild(b);
+  });
+  render("all");
+}).catch(() => {
+  document.getElementById("stats").innerHTML = '<p class="note">Results not found — run the training script and copy results/ into docs/.</p>';
+});
+</script>
+</body>
+</html>
